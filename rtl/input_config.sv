@@ -26,7 +26,7 @@ module input_config (
     input wire dpad_right,
 
     // MPU Input
-    output reg [3:0] input_k = 0,
+    output reg [7:0] input_k = 0,
     output reg input_wake = 0,
 
     output reg input_beta = 0,
@@ -149,10 +149,10 @@ module input_config (
   // Always active config
   reg [31:0] grounded_input_config = INACTIVE_CONFIG_ROW;
 
-  reg [ 3:0] main_input_k = 0;
+  reg [ 7:0] main_input_k = 0;
 
   always @(posedge clk) begin
-    reg [3:0] temp_k;
+    reg [7:0] temp_k;
 
     temp_k = 0;
     grounded_input_config <= INACTIVE_CONFIG_ROW;
@@ -173,6 +173,11 @@ module input_config (
         if (output_r[1]) temp_k = build_k(sys_config.input_s0_config);
         if (output_r[2]) temp_k = temp_k | build_k(sys_config.input_s1_config);
         if (output_r[3]) temp_k = temp_k | build_k(sys_config.input_s2_config);
+      end
+      3: begin
+        // SM530 has an 8-bit K/KE input port. The generator stores the low
+        // nibble in S0 and the high nibble in S1 for fixed-input Nelsonic games.
+        temp_k = {build_k(sys_config.input_s1_config), build_k(sys_config.input_s0_config)};
       end
       default: begin
         // SM510/SM510 Tiger
@@ -202,16 +207,16 @@ module input_config (
   end
 
   always @(posedge clk) begin
-    reg [3:0] grounded_input_k;
+    reg [7:0] grounded_input_k;
 
-    grounded_input_k = {
+    grounded_input_k = {4'h0,
       input_mux(grounded_input_config[31:24]),
       input_mux(grounded_input_config[23:16]),
       input_mux(grounded_input_config[15:8]),
       input_mux(grounded_input_config[7:0])
     };
 
-    input_k <= main_input_k | grounded_input_k;
+    input_k <= main_input_k | (cpu_id == 4'd3 ? 8'h00 : grounded_input_k);
 
     input_beta <= input_mux(sys_config.input_b_config);
     input_ba <= input_mux(sys_config.input_ba_config);

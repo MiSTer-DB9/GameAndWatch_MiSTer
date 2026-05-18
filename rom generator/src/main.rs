@@ -29,7 +29,7 @@ enum FilterArg {
     Specific { name: String },
     /// Match the games that use a particular CPU
     CPU { name: CPUType },
-    /// Match the specific CPU types supported by the core currently. These are the SM510 (inc. Tiger), SM511, SM512, and SM5a CPUs
+    /// Match the specific CPU types supported by the core currently.
     Supported,
     /// All game types specified in the manifest.json
     All,
@@ -195,6 +195,7 @@ fn main() {
             CPUType::SM510,
             CPUType::SM511,
             CPUType::SM512,
+            CPUType::SM530,
             CPUType::SM510Tiger,
             CPUType::SM5a,
         ]),

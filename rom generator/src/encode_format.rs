@@ -59,8 +59,8 @@ pub fn encode(
 
     config.append(&mut mask_block);
 
-    // Add ROM data. SM511/SM512 melody data is appended at offset 0x1000 so old
-    // SM510/SM5a packages remain layout-compatible.
+    // Add ROM data. Melody data is appended at offset 0x1000 so old SM510/SM5a
+    // packages remain layout-compatible.
     let mut rom_data =
         read_rom_by_name_or_hash(&platform.rom.rom, &platform.rom.rom_hash, asset_dir)?;
 
@@ -116,7 +116,11 @@ pub fn encode(
 fn has_melody_rom(cpu_type: &CPUType) -> bool {
     matches!(
         cpu_type,
-        CPUType::SM511 | CPUType::SM512 | CPUType::SM511Tiger1Bit | CPUType::SM511Tiger2Bit
+        CPUType::SM511
+            | CPUType::SM512
+            | CPUType::SM530
+            | CPUType::SM511Tiger1Bit
+            | CPUType::SM511Tiger2Bit
     )
 }
 

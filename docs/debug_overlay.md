@@ -9,7 +9,7 @@ It is modeled after the bring-up grid used in the Raizing/Toaplan debug passes, 
 - `Debug View`: selects which 8x8 grid to show.
   - `Events`: sticky package/load and CPU event flags.
   - `CPU`: live CPU state bits.
-  - `Melody`: live SM511/SM512 melody-generator state.
+  - `Melody`: live SM511/SM512/SM530 melody-generator state.
   - `Core`: live core/package state.
 - `Debug Freeze`: freezes the current debug grid values for manual transcription. Turn it off to resume live updates, then on again to capture a new snapshot.
 
@@ -32,8 +32,8 @@ Rows 3-8 are SM510-family CPU sticky events from `rtl/sm510.sv`.
 | 1:8 | Melody ROM write seen at appended `0x1000-0x10ff` ROM offset |
 | 2:1 | CPU ID was SM511 |
 | 2:2 | CPU ID was SM512 |
-| 2:3 | CPU ID was SM511 Tiger 1-bit |
-| 2:4 | CPU ID was SM511 Tiger 2-bit |
+| 2:3 | CPU ID was SM530 |
+| 2:4 | CPU ID was SM511 Tiger 1-bit or 2-bit |
 | 2:5 | Nonzero program ROM data was read |
 | 2:6 | Nonzero melody ROM data was read |
 | 2:7 | Melody address changed |
@@ -104,7 +104,7 @@ This is live state. The value bits are displayed left-to-right as the packed row
 
 ## Melody View
 
-This is live state for SM511/SM512 melody debugging.
+This is live state for SM511/SM512/SM530 melody debugging.
 
 | Row | Packed Value |
 | --- | --- |

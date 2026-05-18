@@ -4,6 +4,7 @@
 * [Graphics](graphics.md) - The rendering of MAME ROMs and different CPU's LCD handling
 * [Instructions](instructions.md) - A collection of all instructions used by the supported CPUs, and the differences against the base SM510
 * [Registers](registers.md) - Registers across the CPU and what they do
+* [SM530 Support Notes](sm530.md) - Implementation notes and known limits for Nelsonic SM530 Game Watch titles
 * [ROM Generator](rom_generator.md) - Tool to create the ROMs
 
 ## Implementation

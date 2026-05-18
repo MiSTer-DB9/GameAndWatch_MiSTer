@@ -126,7 +126,7 @@ module gameandwatch (
 
   always @(posedge clk_sys_99_287) begin
     if (wr_8bit && rom_download) begin
-      // ioctl_dout has flipped bytes, flip back by modifying address. SM511/SM512
+	      // ioctl_dout has flipped bytes, flip back by modifying address. Melody-capable
       // packages append the 0x100-byte melody ROM at byte offset 0x1000.
       if (rom_byte_addr < 26'h001000) begin
         rom[rom_byte_addr[11:0]] <= data_8bit;
@@ -142,7 +142,7 @@ module gameandwatch (
   wire [7:0] output_shifter_s;
   wire [3:0] output_r;
 
-  wire [3:0] input_k;
+  wire [7:0] input_k;
   wire input_wake;
 
   wire input_beta;
@@ -209,8 +209,8 @@ module gameandwatch (
   wire [15:0] current_segment_c;
   wire [15:0] current_segment_bs;
 
-  wire [3:0] current_w_prime[9];
-  wire [3:0] current_w_main[9];
+  wire [3:0] current_w_prime[16];
+  wire [3:0] current_w_main[16];
 
   wire divider_1khz;
 
@@ -294,8 +294,8 @@ module gameandwatch (
       debug_core_seen[7]  <= debug_core_seen[7]  | (wr_8bit && rom_download && rom_byte_addr >= 26'h001000 && rom_byte_addr < 26'h001100);
       debug_core_seen[8]  <= debug_core_seen[8]  | (cpu_id == 4'd1);
       debug_core_seen[9]  <= debug_core_seen[9]  | (cpu_id == 4'd2);
-      debug_core_seen[10] <= debug_core_seen[10] | (cpu_id == 4'd6);
-      debug_core_seen[11] <= debug_core_seen[11] | (cpu_id == 4'd7);
+	      debug_core_seen[10] <= debug_core_seen[10] | (cpu_id == 4'd3);
+	      debug_core_seen[11] <= debug_core_seen[11] | (cpu_id == 4'd6 || cpu_id == 4'd7);
       debug_core_seen[12] <= debug_core_seen[12] | (rom_data != 8'd0);
       debug_core_seen[13] <= debug_core_seen[13] | (melody_data != 8'd0);
       debug_core_seen[14] <= debug_core_seen[14] | (melody_addr != debug_last_melody_addr);
@@ -303,7 +303,7 @@ module gameandwatch (
     end
   end
 
-  wire [7:0] debug_core_row0 = {cpu_id, input_k};
+  wire [7:0] debug_core_row0 = {cpu_id, input_k[3:0]};
   wire [7:0] debug_core_row1 = output_shifter_s;
   wire [7:0] debug_core_row2 = {output_r, input_ba, input_beta, image_download, rom_download};
   wire [7:0] debug_core_row3 = rom_addr[11:4];

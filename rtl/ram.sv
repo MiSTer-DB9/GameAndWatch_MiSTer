@@ -14,7 +14,10 @@ module ram (
     // Comb
     output reg [15:0] segment_a = 0,
     output reg [15:0] segment_b = 0,
-    output reg [15:0] segment_c = 0
+    output reg [15:0] segment_c = 0,
+
+    output reg [3:0] sm530_segment_a[16],
+    output reg [3:0] sm530_segment_b[16]
 );
 
   // Entire RAM is represented here. We write through to registers for display RAM (segments)
@@ -24,16 +27,20 @@ module ram (
   reg [3:0] cached_segment_a[16];
   reg [3:0] cached_segment_b[16];
   reg [3:0] cached_segment_c[16];
+  reg [3:0] cached_sm530_segment_a[16];
+  reg [3:0] cached_sm530_segment_b[16];
 
   always_comb begin
     integer i;
 
-    for (i = 0; i < 16; i += 1) begin
-      segment_a[i] = cached_segment_a[i][lcd_h];
-      segment_b[i] = cached_segment_b[i][lcd_h];
-      segment_c[i] = cached_segment_c[i][lcd_h];
-    end
-  end
+	    for (i = 0; i < 16; i += 1) begin
+	      segment_a[i] = cached_segment_a[i][lcd_h];
+	      segment_b[i] = cached_segment_b[i][lcd_h];
+	      segment_c[i] = cached_segment_c[i][lcd_h];
+	      sm530_segment_a[i] = cached_sm530_segment_a[i];
+	      sm530_segment_b[i] = cached_sm530_segment_b[i];
+	    end
+	  end
 
   // Comb
   reg [6:0] final_addr;
@@ -41,7 +48,7 @@ module ram (
   // Function separated out so it can be used for testing
   function [6:0] computed_addr();
     case (cpu_id)
-      4: begin
+	      4: begin
         // SM5a
         reg [2:0] upper_addr;
         upper_addr = addr[6:4];
@@ -57,8 +64,16 @@ module ram (
           // Wrap 0xD-F to 0xC
           computed_addr[3:0] = 4'hC;
         end
-      end
-      default: begin
+	      end
+	      3: begin
+	        // SM530 mirrors LCD A/B RAM at 0x40/0x60 and 0x50/0x70.
+	        if ((addr[6:4] == 3'h6 || addr[6:4] == 3'h7) && addr[3:0] < 4'd12) begin
+	          computed_addr = {1'b0, addr[5:0]};
+	        end else begin
+	          computed_addr = addr;
+	        end
+	      end
+	      default: begin
         // SM510/SM510 Tiger
         computed_addr = addr;
       end
@@ -76,7 +91,11 @@ module ram (
     if (wren) begin
       ram[final_addr] <= data;
 
-      if (cpu_id == 2 && final_addr >= 7'h50 && final_addr < 7'h60) begin
+	      if (cpu_id == 3 && final_addr >= 7'h40 && final_addr < 7'h4C) begin
+	        cached_sm530_segment_a[final_addr[3:0]] <= data;
+	      end else if (cpu_id == 3 && final_addr >= 7'h50 && final_addr < 7'h5C) begin
+	        cached_sm530_segment_b[final_addr[3:0]] <= data;
+	      end else if (cpu_id == 2 && final_addr >= 7'h50 && final_addr < 7'h60) begin
         // SM512 display RAM segment C
         cached_segment_c[final_addr[3:0]] <= data;
       end else if (final_addr >= 7'h60) begin

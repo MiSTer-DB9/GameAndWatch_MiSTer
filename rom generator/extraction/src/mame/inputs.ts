@@ -88,7 +88,7 @@ export const parseInputs = (
         16
       );
 
-      const index = indexFromBit(bit);
+      const bitIndex = indexFromBit(bit);
       const button = parseButton(unparsedButton, line);
 
       if (!button) {
@@ -115,7 +115,8 @@ export const parseInputs = (
       };
 
       if (currentPort.type === "s") {
-        currentPort.bitmap[index] = namedAction;
+        const targetPort = sPortForBit(currentPort, ports, bitIndex);
+        targetPort.bitmap[bitIndex % 4] = namedAction;
       } else {
         // All other ports
         currentPort.bit = namedAction;
@@ -132,18 +133,20 @@ export const parseInputs = (
         16
       );
 
-      const index = indexFromBit(bit);
+      const bitIndex = indexFromBit(bit);
 
       if (currentPort) {
         if (currentPort.type === "s") {
-          if (!currentPort.bitmap[index]) {
+          const targetPort = sPortForBit(currentPort, ports, bitIndex);
+
+          if (!targetPort.bitmap[bitIndex % 4]) {
             // No configured value for that port index. This is probably the first (default)
             const namedAction: NamedAction = {
               action: "unused",
               activeLow: false,
             };
 
-            currentPort.bitmap[index] = namedAction;
+            targetPort.bitmap[bitIndex % 4] = namedAction;
           }
         } else {
           // Single bit port
@@ -249,7 +252,7 @@ export const collapseInputs = (ports: {
           // Both definitions have this port. We need to merge
           if (innerPort.type === "s" && existingPort.type === "s") {
             // Second check to satisfy TS
-            for (let i = 0; i < 3; i++) {
+            for (let i = 0; i < 4; i++) {
               const newBit = innerPort.bitmap[i];
               const existingBit = existingPort.bitmap[i];
 
@@ -312,6 +315,37 @@ const nameInnerPort = (port: Port): string => {
   }
 
   return port.type;
+};
+
+const sPortForBit = (
+  currentPort: Extract<Port, { type: "s" }>,
+  ports: Port[],
+  bitIndex: number
+): Extract<Port, { type: "s" }> => {
+  const index = currentPort.index + Math.floor(bitIndex / 4);
+
+  if (index === currentPort.index) {
+    return currentPort;
+  }
+
+  const existing = ports.find(
+    (port): port is Extract<Port, { type: "s" }> =>
+      port.type === "s" && port.index === index
+  );
+
+  if (existing) {
+    return existing;
+  }
+
+  const port: Extract<Port, { type: "s" }> = {
+    type: "s",
+    index,
+    bitmap: [undefined, undefined, undefined, undefined],
+  };
+
+  ports.push(port);
+
+  return port;
 };
 
 const parseButton = (button: string, line = ""): Action | undefined => {
@@ -443,7 +477,7 @@ const parsePortName = (
 const indexFromBit = (bit: number): number => {
   let value = bit;
 
-  for (let count = 0; count < 4; count++) {
+  for (let count = 0; count < 8; count++) {
     if (value & 0x1) {
       return count;
     }

@@ -16,8 +16,8 @@ module lcd #(
     input wire [15:0] current_segment_c,
     input wire [15:0] current_segment_bs,
 
-    input wire [3:0] current_w_prime[9],
-    input wire [3:0] current_w_main [9],
+    input wire [3:0] current_w_prime[16],
+    input wire [3:0] current_w_main [16],
 
     input wire [1:0] output_lcd_h_index,
 
@@ -34,7 +34,7 @@ module lcd #(
   localparam DECAY_MAX = 5'h1F;
   localparam DECAY_MIN_DISPLAY = 5'h10;
 
-  localparam MAX_X_SEGMENT = 9;
+  localparam MAX_X_SEGMENT = 16;
   localparam MAX_Y_SEGMENT = 16;
   localparam MAX_Z_SEGMENT = 4;
 

@@ -21,7 +21,7 @@ module sm510 (
     output wire [7:0] melody_addr,
 
     // The K1-4 input pins
-    input wire [3:0] input_k,
+    input wire [7:0] input_k,
     input wire       input_wake,
 
     // The BA and Beta input pins
@@ -41,8 +41,8 @@ module sm510 (
     output reg [15:0] segment_bs,
 
     // LCD Segments SM5a
-    output reg [3:0] w_prime[9],
-    output reg [3:0] w_main [9],
+    output reg [3:0] w_prime[16],
+    output reg [3:0] w_main [16],
 
     // Audio
     output wire [3:0] output_r,
@@ -67,14 +67,16 @@ module sm510 (
 
   reg [5:0] last_Pl = 0;
 
-  wire gamma;
-  wire divider_1s_tick;
+	  wire gamma;
+	  wire [3:0] gamma_flags;
+	  wire divider_1s_tick;
 
   wire divider_4hz;
   wire divider_32hz;
   wire divider_64hz;
 
-  wire [14:0] divider;
+	  wire [14:0] divider;
+	  wire [3:0] divider_count_10ms;
 
   instructions inst (
       .cpu_id(cpu_id),
@@ -85,12 +87,14 @@ module sm510 (
       .melody_data(melody_data),
       .ram_data(ram_data),
 
-      // Internal
-      .gamma(gamma),
-      .divider(divider),
-      .divider_4hz(divider_4hz),
-      .divider_32hz(divider_32hz),
-      .last_Pl(last_Pl),
+	      // Internal
+	      .gamma(gamma),
+	      .gamma_flags(gamma_flags),
+	      .divider(divider),
+	      .divider_4hz(divider_4hz),
+	      .divider_32hz(divider_32hz),
+	      .divider_count_10ms(divider_count_10ms),
+	      .last_Pl(last_Pl),
 
       // IO
       .input_k(input_k),
@@ -115,26 +119,32 @@ module sm510 (
 
       .cpu_id(cpu_id),
 
-      .reset_gamma(inst.reset_gamma),
-      .reset_divider(inst.reset_divider),
-      .reset_divider_keep_6(inst.reset_divider_keep_6),
+	      .reset_gamma(inst.reset_gamma),
+	      .reset_gamma_mask(inst.reset_gamma_mask),
+	      .reset_divider(inst.reset_divider),
+	      .reset_divider_keep_6(inst.reset_divider_keep_6),
+	      .reset_10ms_counter(inst.reset_10ms_counter),
 
-      .gamma(gamma),
-      .divider_1s_tick(divider_1s_tick),
+	      .gamma(gamma),
+	      .gamma_flags(gamma_flags),
+	      .divider_1s_tick(divider_1s_tick),
 
       .divider_4hz(divider_4hz),
       .divider_32hz(divider_32hz),
-      .divider_64hz(divider_64hz),
-      .divider_1khz(divider_1khz),
-      .divider(divider)
-  );
+	      .divider_64hz(divider_64hz),
+	      .divider_1khz(divider_1khz),
+	      .divider_count_10ms(divider_count_10ms),
+	      .divider(divider)
+	  );
 
   ////////////////////////////////////////////////////////////////////////////////////////
   // LCD Strobe
 
-  wire [15:0] ram_segment_a;
-  wire [15:0] ram_segment_b;
-  wire [15:0] ram_segment_c;
+	  wire [15:0] ram_segment_a;
+	  wire [15:0] ram_segment_b;
+	  wire [15:0] ram_segment_c;
+	  wire [ 3:0] ram_sm530_segment_a[16];
+	  wire [ 3:0] ram_sm530_segment_b[16];
 
   // Select the active bit of display memory words in use
   // Comb
@@ -158,14 +168,22 @@ module sm510 (
         // Strobe LCD
         lcd_h_index <= lcd_h_index + 2'b1;
 
-        // Copy over segments
-        segment_a <= ram_segment_a;
-        segment_b <= ram_segment_b;
-        segment_c <= ram_segment_c;
+	        // Copy over segments
+	        segment_a <= ram_segment_a;
+	        segment_b <= ram_segment_b;
+	        segment_c <= ram_segment_c;
 
-        w_prime <= inst.w_prime;
-        w_main <= inst.w_main;
-      end
+	        if (is_sm530) begin
+	          integer i;
+	          for (i = 0; i < 16; i += 1) begin
+	            w_prime[i] <= inst.sm530_display_enabled ? ram_sm530_segment_a[i] : 4'h0;
+	            w_main[i]  <= inst.sm530_display_enabled ? ram_sm530_segment_b[i] : 4'h0;
+	          end
+	        end else begin
+	          w_prime <= inst.w_prime;
+	          w_main  <= inst.w_main;
+	        end
+	      end
     end
   end
 
@@ -201,16 +219,18 @@ module sm510 (
       .cpu_id(cpu_id),
 
       // While temp_sbm is set, we operate as if the highest bit is high, rather than its current value
-      .addr(inst.temp_sbm ? {1'b1, inst.ram_addr[5:0]} : inst.ram_addr),
+	      .addr(inst.ram_addr | (inst.temp_sbm ? 7'h40 : 7'h00) | (inst.temp_sabl ? 7'h08 : 7'h00)),
       .wren(inst.ram_wr),
       .data(inst.ram_wr_data),
       .q(ram_data),
 
-      .lcd_h(lcd_h_index + 2'h1),
-      .segment_a(ram_segment_a),
-      .segment_b(ram_segment_b),
-      .segment_c(ram_segment_c)
-  );
+	      .lcd_h(lcd_h_index + 2'h1),
+	      .segment_a(ram_segment_a),
+	      .segment_b(ram_segment_b),
+	      .segment_c(ram_segment_c),
+	      .sm530_segment_a(ram_sm530_segment_a),
+	      .sm530_segment_b(ram_sm530_segment_b)
+	  );
 
   ////////////////////////////////////////////////////////////////////////////////////////
   // Halt
@@ -223,9 +243,12 @@ module sm510 (
     end else if (clk_en) begin
       reset_halt <= 0;
 
-      if (divider_1s_tick || (is_sm511_family ? input_wake : (input_k != 4'd0))) begin
+      if (divider_1s_tick ||
+          (is_sm530 && gamma_flags != 4'h0) ||
+          (is_sm511_family ? input_wake : (input_k != 8'd0))) begin
         // SM511/SM512 K inputs can wake halt before S has selected a row.
-        // Older cores keep the existing row-scanned K wake behavior.
+        // SM530 can wake on any pending gamma flag. Older cores keep the
+        // existing row-scanned K wake behavior.
         reset_halt <= 1;
       end
     end
@@ -240,6 +263,9 @@ module sm510 (
   // SM511 | SM512
   wire is_sm511_family = cpu_id == 1 || cpu_id == 2 || cpu_id == 6 || cpu_id == 7;
 
+  // SM530
+  wire is_sm530 = cpu_id == 3;
+
   // SM5a
   wire is_sm5a = cpu_id == 4;
 
@@ -249,32 +275,46 @@ module sm510 (
   // LBL xy | CEND/DTA
   wire is_two_bytes_sm5a = opcode == 8'h5F || opcode == 8'h5E;
 
-  // LBL xy | RME/SME/TMEL/etc. | PRE | TML xyz | TL xyz
-  wire is_two_bytes_sm511 = (opcode >= 8'h5F && opcode <= 8'h61) ||
-      (opcode[7:2] == 6'b011010) || opcode[7:4] == 4'h7;
+	  // LBL xy | RME/SME/TMEL/etc. | PRE | TML xyz | TL xyz
+	  wire is_two_bytes_sm511 = (opcode >= 8'h5F && opcode <= 8'h61) ||
+	      (opcode[7:2] == 6'b011010) || opcode[7:4] == 4'h7;
 
-  wire is_two_bytes = is_sm5a ? is_two_bytes_sm5a :
-      is_sm511_family ? is_two_bytes_sm511 : is_two_bytes_sm510;
-  // TM x
-  wire is_tm = (is_sm510 || is_sm511_family) && opcode[7:6] == 2'b11;
+	  // LBL xy | PRE x | TL xy
+	  wire is_two_bytes_sm530 = opcode == 8'h6B || opcode == 8'h78 || (opcode & 8'hF8) == 8'h60;
+
+	  wire is_two_bytes = is_sm5a ? is_two_bytes_sm5a :
+	      is_sm530 ? is_two_bytes_sm530 :
+	      is_sm511_family ? is_two_bytes_sm511 : is_two_bytes_sm510;
+	  // TM x
+	  wire is_tm = (is_sm510 || is_sm511_family) && opcode[7:6] == 2'b11;
+	  wire is_sm530_trs = is_sm530 && opcode[7:6] == 2'b11;
   // LAX x
-  wire is_lax = opcode[7:4] == 4'h2;
+	  wire is_lax = is_sm530 ? opcode[7:4] == 4'h1 : opcode[7:4] == 4'h2;
 
-  reg sm511_clock_phase = 0;
-  wire instr_clk_en = clk_en &&
-      (!is_sm511_family || !inst.sm511_slow_clock || sm511_clock_phase);
+	  reg sm511_clock_phase = 0;
+	  reg [1:0] sm530_clock_phase = 0;
+	  wire instr_clk_en = clk_en &&
+	      (!is_sm511_family || !inst.sm511_slow_clock || sm511_clock_phase) &&
+	      (!is_sm530 || sm530_clock_phase == 2'd2);
 
   always @(posedge clk) begin
     if (reset) begin
-      sm511_clock_phase <= 0;
-    end else if (clk_en) begin
+	      sm511_clock_phase <= 0;
+	      sm530_clock_phase <= 0;
+	    end else if (clk_en) begin
       if (is_sm511_family && inst.sm511_slow_clock) begin
         sm511_clock_phase <= ~sm511_clock_phase;
       end else begin
         sm511_clock_phase <= 1;
-      end
-    end
-  end
+	      end
+
+	      if (is_sm530) begin
+	        sm530_clock_phase <= sm530_clock_phase == 2'd2 ? 2'd0 : sm530_clock_phase + 2'd1;
+	      end else begin
+	        sm530_clock_phase <= 0;
+	      end
+	    end
+	  end
 
   localparam STAGE_LOAD_PC = 0;
   localparam STAGE_DECODE_PERF_1 = 1;
@@ -310,7 +350,7 @@ module sm510 (
         STAGE_DECODE_PERF_1: begin
           stage <= STAGE_LOAD_PC;
 
-          if (is_tm) begin
+	          if (is_tm || is_sm530_trs) begin
             // TMI x. Load IDX data
             stage <= STAGE_IDX_FETCH;
           end else if (is_two_bytes) begin
@@ -358,7 +398,7 @@ module sm510 (
   wire [7:0] debug_cpu_row2 = {inst.pc[3:0], opcode[7:4]};
   wire [7:0] debug_cpu_row3 = {opcode[3:0], inst.Acc};
   wire [7:0] debug_cpu_row4 = {inst.carry, inst.Bm, inst.Bl};
-  wire [7:0] debug_cpu_row5 = {input_k, inst.output_r};
+	  wire [7:0] debug_cpu_row5 = {input_k[3:0], inst.output_r};
   wire [7:0] debug_cpu_row6 = inst.shifter_s;
   wire [7:0] debug_cpu_row7 = {
     instr_clk_en,
@@ -487,8 +527,9 @@ module sm510 (
     end
   end
 
-  // Internal
-  reg last_temp_sbm = 0;
+	  // Internal
+	  reg last_temp_sbm = 0;
+	  reg last_temp_sabl = 0;
 
   // Decoder
 
@@ -584,7 +625,7 @@ module sm510 (
     endcase
   endtask
 
-  task sm511_decode();
+	  task sm511_decode();
     casex (opcode)
       8'h00: inst.rot();  // ROT. Rotate right
       // 0x01 is documented by MAME as DTA, with some uncertainty around exact divider bits
@@ -664,9 +705,86 @@ module sm510 (
         {inst.Pu, inst.Pm, inst.Pl} <= {2'b0, 4'b0, opcode[5:0]};
       end
     endcase
-  endtask
+	  endtask
 
-  task sm5a_decode();
+	  task sm530_decode();
+	    casex (opcode)
+	      8'h0X: inst.adx_sm530();  // ADX x. Add immed to Acc. Skip next on carry
+	      8'h1X: inst.lax();  // LAX x. Load Acc with immed. If next instruction is LAX, skip it
+	      8'b0010_00XX: begin
+	        inst.exc_x(0);  // LDA x. Load Acc with RAM value. XOR Bm with immed
+	      end
+	      8'b0010_01XX: begin
+	        inst.exc_x(1);  // EXC x. Swap Acc and RAM. XOR Bm with immed
+	      end
+	      8'b0010_10XX: begin
+	        inst.exc_x(1);  // EXCI x
+	        inst.incb_sm530();
+	      end
+	      8'b0010_11XX: begin
+	        inst.exc_x(1);  // EXCD x
+	        inst.decb();
+	      end
+	      8'h3X: inst.lb_sm530();  // LB x
+	      8'b0100_00XX: inst.rm();  // RM x. Zero RAM bit
+	      8'b0100_01XX: inst.sm();  // SM x. Set RAM bit
+	      8'b0100_10XX: inst.tmi();  // TM x. Skip if indexed memory bit is set
+	      8'h4C: inst.incb_sm530();  // INCB. Increment Bl. Overflow on bit 3
+	      8'h4D: inst.decb();  // DECB. Decrement Bl
+	      8'h4E: inst.rds();  // RDS. Disable display
+	      8'h4F: inst.sds();  // SDS. Enable display
+	      8'h50: inst.kta();  // KTA. Read K low nibble into Acc
+	      8'h51: inst.keta();  // KETA. Read K high nibble into Acc
+	      8'h52: inst.dta_sm530();  // DTA. Copy 1/100s counter to Acc
+	      8'h53: inst.coma();  // COMA. NOT Acc
+	      8'h54: inst.add();  // ADD. Add RAM to Acc
+	      8'h55: inst.add11();  // ADDC. Add RAM and carry to Acc
+	      8'h56: inst.rc();  // RC. Clear carry
+	      8'h57: inst.sc();  // SC. Set carry
+	      8'h58: inst.tabl();  // TABL. Skip if Acc = Bl
+	      8'h59: inst.tam();  // TAM. Skip if Acc = RAM
+	      8'h5A: inst.exbla();  // EXBL. Swap Acc and Bl
+	      8'h5B: inst.tc();  // TC. Skip if C = 0
+	      8'h5C: inst.ats();  // ATS. Output Acc to S
+	      8'h5D: inst.atf();  // ATF. Output Acc to F
+	      8'h5E: inst.atbp();  // ATBP. Set BP to Acc
+	      8'b0110_0XXX: begin
+	        // TL xy (2 byte). Entirely done in second stage.
+	      end
+	      8'h68: begin
+	        inst.pop_stack(1);  // RTN
+	      end
+	      8'h69: begin
+	        inst.pop_stack(1);  // RTNS
+	        inst.skip_next_instr <= 1;
+	      end
+	      8'h6A: inst.atpl();  // ATPL. Load Pl with Acc
+	      8'h6B: begin
+	        // LBL xy (2 byte). Entirely done in second stage.
+	      end
+	      8'b0110_11XX: inst.tg();  // TG x. Test/reset gamma flag
+	      8'h70: inst.idiv();  // IDIV. Reset divider
+	      8'h71: inst.inis();  // INIS. Reset 1/100s counter
+	      8'h72: inst.sbm();  // SABM. Set high bit of Bm for next instruction
+	      8'h73: inst.sabl();  // SABL. Set high bit of Bl for next instruction
+	      8'h74: inst.cend();  // CEND. Stop clock
+	      8'h75: inst.tmel();  // TMEL. Test melody stop flag
+	      8'h76: inst.rme();  // RME. Disable melody
+	      8'h77: inst.sme();  // SME. Enable melody
+	      8'h78: begin
+	        // PRE x (2 byte). Entirely done in second stage.
+	      end
+	      8'h79: inst.tal();  // TBA. Skip if BA = 1
+	      8'b10XX_XXXX: inst.t();  // TR x. Short jump in current page
+	      8'b11XX_XXXX: begin
+	        // TRS x. Indirect subroutine call through page 14.
+	        inst.push_stack(inst.pc);
+	        {inst.Pu, inst.Pm, inst.Pl} <= {2'b00, 4'hE, opcode[5:0]};
+	      end
+	    endcase
+	  endtask
+
+	  task sm5a_decode();
     reg [3:0] w_length;
     reg trs_field;
 
@@ -732,7 +850,7 @@ module sm510 (
       8'h60: inst.comcn();  // COMCN. XOR (complement) LCD CN flag
       8'h61: begin
         // PDTW. Shift last two nibbles of W', moving one PLA value in
-        reg [3:0] w_prime_temp[9];
+        reg [3:0] w_prime_temp[16];
         reg [3:0] digit;
 
         digit = inst.pla_digit();
@@ -816,10 +934,11 @@ module sm510 (
       // some registers initial states
 
       // Initial PC to 3_7_0
-      case (cpu_id)
-        4:       {inst.Pu, inst.Pm, inst.Pl} <= {2'h0, 4'hF, 6'b0};  // SM5a
-        default: {inst.Pu, inst.Pm, inst.Pl} <= {2'h3, 4'h7, 6'b0};  // SM510
-      endcase
+	      case (cpu_id)
+	        3:       {inst.Pu, inst.Pm, inst.Pl} <= {2'h0, 4'hF, 6'b0};  // SM530
+	        4:       {inst.Pu, inst.Pm, inst.Pl} <= {2'h0, 4'hF, 6'b0};  // SM5a
+	        default: {inst.Pu, inst.Pm, inst.Pl} <= {2'h3, 4'h7, 6'b0};  // SM510
+	      endcase
 
       inst.stack_s <= 0;
       inst.stack_r <= 0;
@@ -841,14 +960,17 @@ module sm510 (
       inst.skip_next_instr <= 0;
       inst.skip_next_if_lax <= 0;
 
-      inst.temp_sbm <= 0;
+	      inst.temp_sbm  <= 0;
+	      inst.temp_sabl <= 0;
 
       inst.next_ram_addr <= 0;
       inst.wr_next_ram_addr <= 0;
 
-      inst.reset_divider <= 0;
-      inst.reset_divider_keep_6 <= 0;
-      inst.reset_gamma <= 0;
+	      inst.reset_divider <= 0;
+	      inst.reset_divider_keep_6 <= 0;
+	      inst.reset_gamma <= 0;
+	      inst.reset_gamma_mask <= 0;
+	      inst.reset_10ms_counter <= 0;
 
       inst.halt <= 0;
 
@@ -862,9 +984,11 @@ module sm510 (
       last_Pl <= 0;
 
       last_opcode <= 0;
-      last_temp_sbm <= 0;
+	      last_temp_sbm  <= 0;
+	      last_temp_sabl <= 0;
 
-      inst.output_r <= 0;
+	      inst.output_r <= 0;
+	      inst.output_f <= 0;
       inst.sm511_slow_clock <= 1;
       inst.melody_rd <= 0;
       inst.melody_step_count <= 0;
@@ -875,10 +999,10 @@ module sm510 (
       inst.melody_target_cycles <= 0;
 
       case (cpu_id)
-        1, 2, 6, 7: begin
-          // SM511/SM512
-          inst.stored_output_r <= 0;
-          inst.output_r_mask <= 3'h7;
+	        1, 2, 3, 6, 7: begin
+	          // SM511/SM512/SM530
+	          inst.stored_output_r <= 0;
+	          inst.output_r_mask <= 3'h7;
         end
         4: begin
           // SM5a
@@ -901,21 +1025,30 @@ module sm510 (
         end
       endcase
 
-      inst.output_r <= 0;
+	      inst.output_r <= 0;
+	      inst.sm530_display_enabled <= 1;
 
       // SM5a
       inst.cb_bank <= 0;
 
       inst.within_subroutine <= 0;
 
-      inst.lcd_cn <= 0;
-      inst.m_prime <= 0;
+	      inst.lcd_cn <= 0;
+	      inst.m_prime <= 0;
+	      for (int i = 0; i < 16; i += 1) begin
+	        inst.w_prime[i] <= 0;
+	        inst.w_main[i]  <= 0;
+	        w_prime[i] <= 0;
+	        w_main[i]  <= 0;
+	      end
 
-      inst.init_pla();
+	      inst.init_pla();
     end else if (clk_en) begin
-      inst.reset_divider <= 0;
-      inst.reset_divider_keep_6 <= 0;
-      inst.reset_gamma <= 0;
+	      inst.reset_divider <= 0;
+	      inst.reset_divider_keep_6 <= 0;
+	      inst.reset_gamma <= 0;
+	      inst.reset_gamma_mask <= 0;
+	      inst.reset_10ms_counter <= 0;
 
       inst.ram_wr <= 0;
 
@@ -939,10 +1072,8 @@ module sm510 (
           inst.skip_next_if_lax <= inst.skip_next_if_lax && is_lax;
           inst.wr_next_ram_addr <= 0;
 
-          if (last_temp_sbm) begin
-            // SBM flag has been set and used for one instruction. Lower it
-            inst.temp_sbm <= 0;
-          end
+	          if (last_temp_sbm) inst.temp_sbm <= 0;
+	          if (last_temp_sabl) inst.temp_sabl <= 0;
 
           if (inst.wr_next_ram_addr) begin
             {inst.Bm[1:0], inst.Bl} <= inst.next_ram_addr;
@@ -954,8 +1085,9 @@ module sm510 (
         STAGE_HALT: begin
           // Load PC at 1_0_00
           case (cpu_id)
-            4:       {inst.Pu, inst.Pm, inst.Pl} <= {2'b0, 4'b0, 6'b0};  // SM5a
-            default: {inst.Pu, inst.Pm, inst.Pl} <= {2'b1, 4'b0, 6'b0};  // SM510/SM510 Tiger
+	            3:       {inst.Pu, inst.Pm, inst.Pl} <= {2'b0, 4'b0, 6'b0};  // SM530
+	            4:       {inst.Pu, inst.Pm, inst.Pl} <= {2'b0, 4'b0, 6'b0};  // SM5a
+	            default: {inst.Pu, inst.Pm, inst.Pl} <= {2'b1, 4'b0, 6'b0};  // SM510/SM510 Tiger
           endcase
 
           inst.cb_bank <= 0;
@@ -965,19 +1097,21 @@ module sm510 (
           end
         end
         STAGE_DECODE_PERF_1: begin
-          last_opcode   <= opcode;
-          last_temp_sbm <= inst.temp_sbm;
+	          last_opcode    <= opcode;
+	          last_temp_sbm  <= inst.temp_sbm;
+	          last_temp_sabl <= inst.temp_sabl;
 
-          case (cpu_id)
-            1, 2, 6, 7: sm511_decode();  // SM511/SM512
-            4: sm5a_decode();
+	          case (cpu_id)
+	            1, 2, 6, 7: sm511_decode();  // SM511/SM512
+	            3: sm530_decode();
+	            4: sm5a_decode();
             default: sm510_decode();  // SM510/SM510 Tiger
           endcase
         end
         STAGE_PERF_3: begin
           casex (last_opcode)
-            8'h60: begin
-              if (is_sm511_family) begin
+	            8'h60: begin
+	              if (is_sm511_family) begin
                 // SM511/SM512: Extended opcodes
                 casex (opcode)
                   8'h30: inst.rme();  // RME. Disable melody
@@ -990,13 +1124,29 @@ module sm510 (
                   8'h37: inst.clklo();  // CLKLO. Select 8.192kHz instruction clock
                   default: $display("Unknown SM511 extended instruction %h_%h", last_opcode, opcode);
                 endcase
-              end
-            end
-            8'h61: begin
-              if (is_sm511_family) begin
-                inst.pre();  // PRE x. Preset melody ROM address
-              end
-            end
+	              end else if (is_sm530) begin
+	                {inst.Pu, inst.Pm, inst.Pl} <= {
+	                  1'b0, last_opcode[2:0], opcode[7:6], opcode[5:0]
+	                };
+	              end
+	            end
+	            8'h61: begin
+	              if (is_sm511_family) begin
+	                inst.pre();  // PRE x. Preset melody ROM address
+	              end else if (is_sm530) begin
+	                {inst.Pu, inst.Pm, inst.Pl} <= {
+	                  1'b0, last_opcode[2:0], opcode[7:6], opcode[5:0]
+	                };
+	              end
+	            end
+	            8'b0110_0XXX: begin
+	              if (is_sm530) begin
+	                // SM530: TL xy uses opcodes 0x60-0x67.
+	                {inst.Pu, inst.Pm, inst.Pl} <= {
+	                  1'b0, last_opcode[2:0], opcode[7:6], opcode[5:0]
+	                };
+	              end
+	            end
             8'b0110_10XX: begin
               if (is_sm511_family) begin
                 // TML xyz (2 byte). Long call. Push PC + 1 into stack registers. Load PC with immediates.
@@ -1014,12 +1164,23 @@ module sm510 (
                 8'h04: inst.dta();  // DTA. Copy high bits of clock divider to Acc
               endcase
             end
-            8'h5F: begin
-              // LBL xy (2 byte). Immed is only second byte. Set Bm to high 3 bits of immed, and Bl to low 4 immed. Highest bit is unused
-              inst.Bm <= opcode[6:4];
-              inst.Bl <= opcode[3:0];
-            end
-            8'h7X: begin
+	            8'h5F: begin
+	              // LBL xy (2 byte). Immed is only second byte. Set Bm to high 3 bits of immed, and Bl to low 4 immed. Highest bit is unused
+	              inst.Bm <= opcode[6:4];
+	              inst.Bl <= opcode[3:0];
+	            end
+	            8'h6B: begin
+	              if (is_sm530) begin
+	                inst.Bm <= opcode[6:4];
+	                inst.Bl <= opcode[3:0];
+	              end
+	            end
+	            8'h78: begin
+	              if (is_sm530) begin
+	                inst.pre();  // PRE x. Preset melody ROM address
+	              end
+	            end
+	            8'h7X: begin
               if (is_sm511_family) begin
                 // SM511/SM512: TL xyz uses the full 0x70-0x7F opcode range.
                 {inst.Pu, inst.Pm, inst.Pl} <= {opcode[7:6], last_opcode[3:0], opcode[5:0]};
@@ -1048,10 +1209,17 @@ module sm510 (
             end
           endcase
         end
-        STAGE_IDX_PERF: begin
-          // Prev cycle fetched IDX data. Now set PC
-          {inst.Pu, inst.Pm, inst.Pl} <= {opcode[7:6], 4'h4, opcode[5:0]};
-        end
+	        STAGE_IDX_PERF: begin
+	          // Prev cycle fetched IDX data. Now set PC
+	          if (is_sm530) begin
+	            // SM530 TRS vectors live on page 14 and encode page bits as 5,7,6.
+	            {inst.Pu, inst.Pm, inst.Pl} <= {
+	              1'b0, 2'b00, opcode[5], opcode[7], opcode[6], 1'b0, opcode[4:0]
+	            };
+	          end else begin
+	            {inst.Pu, inst.Pm, inst.Pl} <= {opcode[7:6], 4'h4, opcode[5:0]};
+	          end
+	        end
         endcase
       end
     end
