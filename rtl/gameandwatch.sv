@@ -304,13 +304,18 @@ module gameandwatch (
   end
 
   wire [7:0] debug_core_row0 = {cpu_id, input_k[3:0]};
-  wire [7:0] debug_core_row1 = output_shifter_s;
+  wire [7:0] debug_core_row1 = cpu_id == 4'd3 ? input_k : output_shifter_s;
   wire [7:0] debug_core_row2 = {output_r, input_ba, input_beta, image_download, rom_download};
-  wire [7:0] debug_core_row3 = rom_addr[11:4];
-  wire [7:0] debug_core_row4 = {rom_addr[3:0], rom_data[7:4]};
-  wire [7:0] debug_core_row5 = {rom_data[3:0], melody_addr[7:4]};
-  wire [7:0] debug_core_row6 = {melody_addr[3:0], melody_data[7:4]};
-  wire [7:0] debug_core_row7 = {melody_data[3:0], current_segment_a[3:0]};
+  wire [7:0] debug_core_row3 = cpu_id == 4'd3 ? {current_w_prime[0], current_w_main[0]} :
+      rom_addr[11:4];
+  wire [7:0] debug_core_row4 = cpu_id == 4'd3 ? {current_w_prime[1], current_w_main[1]} :
+      {rom_addr[3:0], rom_data[7:4]};
+  wire [7:0] debug_core_row5 = cpu_id == 4'd3 ? {current_w_prime[2], current_w_main[2]} :
+      {rom_data[3:0], melody_addr[7:4]};
+  wire [7:0] debug_core_row6 = cpu_id == 4'd3 ? {current_w_prime[3], current_w_main[3]} :
+      {melody_addr[3:0], melody_data[7:4]};
+  wire [7:0] debug_core_row7 = cpu_id == 4'd3 ? {current_w_prime[11], current_w_main[11]} :
+      {melody_data[3:0], current_segment_a[3:0]};
 
   wire [63:0] debug_events = {cpu_debug_events[47:0], debug_core_seen};
   wire [63:0] debug_core_state = {debug_core_row7, debug_core_row6, debug_core_row5, debug_core_row4, debug_core_row3, debug_core_row2, debug_core_row1, debug_core_row0};

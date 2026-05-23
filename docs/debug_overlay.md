@@ -98,9 +98,9 @@ This is live state. The value bits are displayed left-to-right as the packed row
 | 3 | `{PC[3:0], opcode[7:4]}` |
 | 4 | `{opcode[3:0], Acc[3:0]}` |
 | 5 | `{carry, Bm[2:0], Bl[3:0]}` |
-| 6 | `{input_k[3:0], output_r[3:0]}` |
-| 7 | `shifter_s[7:0]` |
-| 8 | `{instr_clk_en, halt, reset_halt, gamma, divider_4hz, divider_32hz, divider_64hz, divider_1s_tick}` |
+| 6 | Normal: `{input_k[3:0], output_r[3:0]}`. SM530: `input_k[7:0]` |
+| 7 | Normal: `shifter_s[7:0]`. SM530: `{ram_wr, last_ram_write_addr[6:0]}` |
+| 8 | Normal: `{instr_clk_en, halt, reset_halt, gamma, divider_4hz, divider_32hz, divider_64hz, divider_1s_tick}`. SM530: `{last_ram_write_data[3:0], last_ram_read_data[3:0]}` |
 
 ## Melody View
 
@@ -124,13 +124,13 @@ This is live state from the wrapper around the CPU and loader.
 | Row | Packed Value |
 | --- | --- |
 | 1 | `{cpu_id[3:0], input_k[3:0]}` |
-| 2 | `output_shifter_s[7:0]` |
+| 2 | Normal: `output_shifter_s[7:0]`. SM530: `input_k[7:0]` |
 | 3 | `{output_r[3:0], input_ba, input_beta, image_download, rom_download}` |
-| 4 | `rom_addr[11:4]` |
-| 5 | `{rom_addr[3:0], rom_data[7:4]}` |
-| 6 | `{rom_data[3:0], melody_addr[7:4]}` |
-| 7 | `{melody_addr[3:0], melody_data[7:4]}` |
-| 8 | `{melody_data[3:0], current_segment_a[3:0]}` |
+| 4 | Normal: `rom_addr[11:4]`. SM530: `{current_w_prime[0], current_w_main[0]}` |
+| 5 | Normal: `{rom_addr[3:0], rom_data[7:4]}`. SM530: `{current_w_prime[1], current_w_main[1]}` |
+| 6 | Normal: `{rom_data[3:0], melody_addr[7:4]}`. SM530: `{current_w_prime[2], current_w_main[2]}` |
+| 7 | Normal: `{melody_addr[3:0], melody_data[7:4]}`. SM530: `{current_w_prime[3], current_w_main[3]}` |
+| 8 | Normal: `{melody_data[3:0], current_segment_a[3:0]}`. SM530: `{current_w_prime[11], current_w_main[11]}` |
 
 ## First Test Pass
 
@@ -144,3 +144,15 @@ For an SM511/SM512 game that shows the initial LCD art but does not start:
 The first split to look for is whether `1:8`, `2:6`, `5:5`, `6:1`, and `6:6` ever light. Together those say: melody ROM loaded, melody data read, SME executed, melody enabled, and audio toggled.
 
 For SM511/SM512 input bring-up, also watch `7:1`, `7:4`, and `8:1-8:8`. These say whether the firmware is polling K/BA/Beta or waiting on the one-second flag, whether K ever goes active, whether S was latched nonzero, whether W is being built by `WR`/`WS`, and whether `PTW` ever copies W to the S output row scanner.
+
+## SM530 Bring-up Pass
+
+For a Nelsonic SM530 package that loads artwork but does not start, collect frozen snapshots from `CPU` and `Core` views:
+
+1. Load the package and wait two seconds.
+2. Freeze `CPU` view and record rows 1-8.
+3. Freeze `Core` view and record rows 1-8.
+4. Unfreeze, press Mode, freeze `CPU` and `Core` again.
+5. Repeat for Set and D-pad directions if Mode/Set do not change row 6 in CPU view.
+
+The first split is whether CPU row 1 leaves stage `6` (`HALT`) and whether CPU rows 7-8 show RAM writes. For `nsmb3`, Core row 8 is especially useful because early boot writes LCD RAM group 11.

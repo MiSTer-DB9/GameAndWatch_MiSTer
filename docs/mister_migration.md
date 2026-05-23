@@ -389,3 +389,25 @@ No core video, audio, ROM loader, CPU, or LCD behavior was changed as part of th
 
 - Removed machine-specific absolute directory references from project documentation.
 - Removed `.DS_Store` files from the project tree so Finder metadata is not carried with the source.
+
+## 2026-05-18 SM530 Super Mario Bros. 3 LCD bring-up
+
+- Inspected the generated `nsmb3` package and confirmed it contains a valid SM530 program ROM, melody ROM, populated artwork, and mask IDs in the expected 12 output groups by 4 segment bits by 2 LCD rows shape.
+- Cross-checked the SM530 LCD mapping against MAME: display RAM lives at `0x40-0x4b` and `0x50-0x5b`, with mirrors at `0x60/0x70`, and the LCD callback emits those two RAM banks as the two SM530 LCD rows.
+- Reset the RAM/display caches with the CPU reset and changed the SM530 LCD latch to read the canonical LCD RAM banks directly. This removes any dependency on stale cache state when a package boots and keeps mirror writes flowing through the same canonical RAM addresses.
+- Updated Core debug row 8 for SM530 packages so it exposes the first latched A/B LCD nibbles (`current_w_prime[0]` and `current_w_main[0]`) instead of the SM510-style segment A nibble.
+
+## Deferred CRT/direct-video presentation plan - 2026-05-19
+
+- Original Game & Watch hardware has no native raster resolution; the preservation target is LCD segment geometry, artwork placement, timing, and per-title aspect rather than a universal pixel grid.
+- MAME defines each title as an SVG screen with per-game dimensions, commonly 1080 pixels tall with width chosen for the source artwork. Those dimensions should guide aspect/presentation, but they should not be treated as mandatory MiSTer video timings.
+- The current `720x720` output is a convenient fixed package and video canvas, not a hardware-accurate native mode. A CRT/direct-video-friendly path should decouple the logical artwork canvas from the raw output timing.
+- Preferred future approach: make the raw `VGA_*` stream a real 15 kHz mode, probably `720x480i` if matching the old core's direction or `720x240p` if stable progressive CRT output is preferred, then letterbox/pillarbox the game into that raster using MAME-derived source aspect.
+- Direct video and analog VGA should share that same raw 15 kHz stream. Normal HDMI can then use the MiSTer scaler from the same source; keeping high-res HDMI while simultaneously outputting 15 kHz analog/direct would be a larger dual-path/framebuffer design.
+- The ROM generator likely needs at least metadata updates for source aspect/layout bounds, and ideally a package-versioned CRT render/mask target so the core does not need to do fragile real-time mask downscaling.
+
+## 2026-05-19 SM530 hardware debug overlay expansion
+
+- Added SM530-specific CPU debug rows: row 6 now shows all eight `K/KE` input bits, row 7 shows `{ram_wr, last_ram_write_addr}`, and row 8 shows `{last_ram_write_data, last_ram_read_data}`.
+- Changed Core debug rows for SM530 packages to show LCD output groups 0, 1, 2, 3, and 11 from the latched SM530 A/B LCD RAM path. Group 11 is useful for `nsmb3` because the boot code writes that display group almost immediately.
+- Updated the debug overlay notes with a short SM530 bring-up capture procedure so hardware snapshots can distinguish CPU execution/halt/input problems from LCD normalization problems.

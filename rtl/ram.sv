@@ -1,5 +1,6 @@
 module ram (
     input wire clk,
+    input wire reset,
 
     input wire [3:0] cpu_id,
 
@@ -33,14 +34,20 @@ module ram (
   always_comb begin
     integer i;
 
-	    for (i = 0; i < 16; i += 1) begin
-	      segment_a[i] = cached_segment_a[i][lcd_h];
-	      segment_b[i] = cached_segment_b[i][lcd_h];
-	      segment_c[i] = cached_segment_c[i][lcd_h];
-	      sm530_segment_a[i] = cached_sm530_segment_a[i];
-	      sm530_segment_b[i] = cached_sm530_segment_b[i];
-	    end
-	  end
+    for (i = 0; i < 16; i += 1) begin
+      segment_a[i] = cached_segment_a[i][lcd_h];
+      segment_b[i] = cached_segment_b[i][lcd_h];
+      segment_c[i] = cached_segment_c[i][lcd_h];
+
+      if (cpu_id == 3 && i < 12) begin
+        sm530_segment_a[i] = ram[7'h40 + i];
+        sm530_segment_b[i] = ram[7'h50 + i];
+      end else begin
+        sm530_segment_a[i] = cached_sm530_segment_a[i];
+        sm530_segment_b[i] = cached_sm530_segment_b[i];
+      end
+    end
+  end
 
   // Comb
   reg [6:0] final_addr;
@@ -85,27 +92,45 @@ module ram (
   end
 
   always @(posedge clk) begin
-    // TODO: Does this need to be comb?
-    q <= ram[final_addr];
+    if (reset) begin
+      integer i;
 
-    if (wren) begin
-      ram[final_addr] <= data;
+      q <= 0;
 
-	      if (cpu_id == 3 && final_addr >= 7'h40 && final_addr < 7'h4C) begin
-	        cached_sm530_segment_a[final_addr[3:0]] <= data;
-	      end else if (cpu_id == 3 && final_addr >= 7'h50 && final_addr < 7'h5C) begin
-	        cached_sm530_segment_b[final_addr[3:0]] <= data;
-	      end else if (cpu_id == 2 && final_addr >= 7'h50 && final_addr < 7'h60) begin
-        // SM512 display RAM segment C
-        cached_segment_c[final_addr[3:0]] <= data;
-      end else if (final_addr >= 7'h60) begin
-        // Display RAM segment A/B
-        if (final_addr[4]) begin
-          // Segment B
-          cached_segment_b[final_addr[3:0]] <= data;
-        end else begin
-          // Segment A
-          cached_segment_a[final_addr[3:0]] <= data;
+      for (i = 0; i < 128; i += 1) begin
+        ram[i] <= 0;
+      end
+
+      for (i = 0; i < 16; i += 1) begin
+        cached_segment_a[i] <= 0;
+        cached_segment_b[i] <= 0;
+        cached_segment_c[i] <= 0;
+        cached_sm530_segment_a[i] <= 0;
+        cached_sm530_segment_b[i] <= 0;
+      end
+    end else begin
+      // TODO: Does this need to be comb?
+      q <= ram[final_addr];
+
+      if (wren) begin
+        ram[final_addr] <= data;
+
+        if (cpu_id == 3 && final_addr >= 7'h40 && final_addr < 7'h4C) begin
+          cached_sm530_segment_a[final_addr[3:0]] <= data;
+        end else if (cpu_id == 3 && final_addr >= 7'h50 && final_addr < 7'h5C) begin
+          cached_sm530_segment_b[final_addr[3:0]] <= data;
+        end else if (cpu_id == 2 && final_addr >= 7'h50 && final_addr < 7'h60) begin
+          // SM512 display RAM segment C
+          cached_segment_c[final_addr[3:0]] <= data;
+        end else if (final_addr >= 7'h60) begin
+          // Display RAM segment A/B
+          if (final_addr[4]) begin
+            // Segment B
+            cached_segment_b[final_addr[3:0]] <= data;
+          end else begin
+            // Segment A
+            cached_segment_a[final_addr[3:0]] <= data;
+          end
         end
       end
     end

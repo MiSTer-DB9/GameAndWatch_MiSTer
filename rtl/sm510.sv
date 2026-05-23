@@ -158,6 +158,15 @@ module sm510 (
   always @(posedge clk) begin
     if (reset) begin
       lcd_h_index <= 0;
+      prev_strobe_divider <= 0;
+      segment_a <= 0;
+      segment_b <= 0;
+      segment_c <= 0;
+
+      for (int i = 0; i < 16; i += 1) begin
+        w_prime[i] <= 0;
+        w_main[i]  <= 0;
+      end
     end else if (clk_en) begin
       reg temp;
       temp = accurate_lcd_timing ? divider_64hz : divider_1khz;
@@ -213,24 +222,34 @@ module sm510 (
   ////////////////////////////////////////////////////////////////////////////////////////
   // RAM
 
+  wire [6:0] ram_addr_with_masks =
+      inst.ram_addr | (inst.temp_sbm ? 7'h40 : 7'h00) | (inst.temp_sabl ? 7'h08 : 7'h00);
+
+  wire [6:0] debug_ram_addr =
+      (cpu_id == 4'd3 &&
+       (ram_addr_with_masks[6:4] == 3'h6 || ram_addr_with_masks[6:4] == 3'h7) &&
+       ram_addr_with_masks[3:0] < 4'd12) ? {1'b0, ram_addr_with_masks[5:0]} :
+      ram_addr_with_masks;
+
   ram ram (
       .clk(clk),
+      .reset(reset),
 
       .cpu_id(cpu_id),
 
       // While temp_sbm is set, we operate as if the highest bit is high, rather than its current value
-	      .addr(inst.ram_addr | (inst.temp_sbm ? 7'h40 : 7'h00) | (inst.temp_sabl ? 7'h08 : 7'h00)),
+      .addr(ram_addr_with_masks),
       .wren(inst.ram_wr),
       .data(inst.ram_wr_data),
       .q(ram_data),
 
-	      .lcd_h(lcd_h_index + 2'h1),
-	      .segment_a(ram_segment_a),
-	      .segment_b(ram_segment_b),
-	      .segment_c(ram_segment_c),
-	      .sm530_segment_a(ram_sm530_segment_a),
-	      .sm530_segment_b(ram_sm530_segment_b)
-	  );
+      .lcd_h(lcd_h_index + 2'h1),
+      .segment_a(ram_segment_a),
+      .segment_b(ram_segment_b),
+      .segment_c(ram_segment_c),
+      .sm530_segment_a(ram_sm530_segment_a),
+      .sm530_segment_b(ram_sm530_segment_b)
+  );
 
   ////////////////////////////////////////////////////////////////////////////////////////
   // Halt
@@ -392,15 +411,18 @@ module sm510 (
   reg [ 3:0] debug_last_stage = 4'd0;
   reg [ 7:0] debug_last_melody_address = 8'd0;
   reg [ 3:0] debug_last_output_r = 4'd0;
+  reg [ 6:0] debug_last_ram_wr_addr = 7'd0;
+  reg [ 3:0] debug_last_ram_wr_data = 4'd0;
+  reg [ 3:0] debug_last_ram_rd_data = 4'd0;
 
   wire [7:0] debug_cpu_row0 = {cpu_id, stage};
   wire [7:0] debug_cpu_row1 = inst.pc[11:4];
   wire [7:0] debug_cpu_row2 = {inst.pc[3:0], opcode[7:4]};
   wire [7:0] debug_cpu_row3 = {opcode[3:0], inst.Acc};
   wire [7:0] debug_cpu_row4 = {inst.carry, inst.Bm, inst.Bl};
-	  wire [7:0] debug_cpu_row5 = {input_k[3:0], inst.output_r};
-  wire [7:0] debug_cpu_row6 = inst.shifter_s;
-  wire [7:0] debug_cpu_row7 = {
+  wire [7:0] debug_cpu_row5 = is_sm530 ? input_k : {input_k[3:0], inst.output_r};
+  wire [7:0] debug_cpu_row6 = is_sm530 ? {inst.ram_wr, debug_last_ram_wr_addr} : inst.shifter_s;
+  wire [7:0] debug_cpu_row7 = is_sm530 ? {debug_last_ram_wr_data, debug_last_ram_rd_data} : {
     instr_clk_en,
     inst.halt,
     reset_halt,
@@ -455,12 +477,21 @@ module sm510 (
       debug_last_stage <= 4'd0;
       debug_last_melody_address <= 8'd0;
       debug_last_output_r <= 4'd0;
+      debug_last_ram_wr_addr <= 7'd0;
+      debug_last_ram_wr_data <= 4'd0;
+      debug_last_ram_rd_data <= 4'd0;
     end else if (clk_en) begin
       debug_last_pc <= inst.pc;
       debug_last_opcode <= opcode;
       debug_last_stage <= stage;
       debug_last_melody_address <= inst.melody_address;
       debug_last_output_r <= inst.output_r;
+      debug_last_ram_rd_data <= ram_data;
+
+      if (inst.ram_wr) begin
+        debug_last_ram_wr_addr <= debug_ram_addr;
+        debug_last_ram_wr_data <= inst.ram_wr_data;
+      end
 
       debug_seen[0]  <= debug_seen[0]  | 1'b1;
       debug_seen[1]  <= debug_seen[1]  | is_sm511_family;
@@ -498,7 +529,7 @@ module sm510 (
       debug_seen[30] <= debug_seen[30] | (is_sm511_family && !inst.sm511_slow_clock);
       debug_seen[31] <= debug_seen[31] | (is_sm511_family && inst.sm511_slow_clock);
 
-      debug_seen[32] <= debug_seen[32] | (input_k != 4'd0);
+      debug_seen[32] <= debug_seen[32] | (input_k != 8'd0);
       debug_seen[33] <= debug_seen[33] | input_ba;
       debug_seen[34] <= debug_seen[34] | input_beta;
       debug_seen[35] <= debug_seen[35] | (inst.shifter_s != 8'd0);
@@ -1034,15 +1065,13 @@ module sm510 (
       inst.within_subroutine <= 0;
 
 	      inst.lcd_cn <= 0;
-	      inst.m_prime <= 0;
-	      for (int i = 0; i < 16; i += 1) begin
-	        inst.w_prime[i] <= 0;
-	        inst.w_main[i]  <= 0;
-	        w_prime[i] <= 0;
-	        w_main[i]  <= 0;
-	      end
+      inst.m_prime <= 0;
+      for (int i = 0; i < 16; i += 1) begin
+        inst.w_prime[i] <= 0;
+        inst.w_main[i]  <= 0;
+      end
 
-	      inst.init_pla();
+      inst.init_pla();
     end else if (clk_en) begin
 	      inst.reset_divider <= 0;
 	      inst.reset_divider_keep_6 <= 0;
