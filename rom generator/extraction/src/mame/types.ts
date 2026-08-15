@@ -71,6 +71,30 @@ export interface PlatformSpecification {
   portMap: PlatformPortMapping;
   metadata: Metadata;
   rom: ROMName;
+  /** MAME SYST parent, used for inherited artwork and screen assets. */
+  parent?: string;
+  /** Capability limitation discovered from the MAME driver. */
+  unsupportedReason?: string;
+  voice?: VoiceDefinition;
+  auxRom?: AuxROMDefinition;
+  /** Preferred folder below the artwork root, with standard ZIP fallback. */
+  artworkSubdirectory?: string;
+  /** Enable the package-declared SM530 startup-sound compatibility behavior. */
+  defaultSoundOn?: boolean;
+}
+
+export type AuxROMDefinition = {
+  type: "ha1152";
+  region: "sfx";
+  rom: string;
+  size: number;
+  romHash: string;
+};
+
+export interface VoiceDefinition {
+  sampleSet: string;
+  /** Sample command 1 is at index 0. Null entries are intentional holes. */
+  commands: (string | null)[];
 }
 
 export interface ROMName {
@@ -115,9 +139,13 @@ export type Action =
   | "start2"
   | "service1"
   | "service2"
+  | "service3"
+  | "service4"
   | "volumeDown"
   | "powerOn"
   | "powerOff"
+  // Analog controls are preserved so capability filtering can reject them.
+  | "dial"
   // Keypad is not supported
   | "keypad"
   | "custom"
@@ -129,6 +157,8 @@ export interface NamedAction {
   action: Action;
   activeLow: boolean;
   name?: string;
+  /** MAME PORT_PLAYER owner. Omitted for the primary/default player. */
+  player?: number;
 }
 
 export type UndfAction = NamedAction | undefined;

@@ -12,8 +12,8 @@ module normalize #(
     input wire [15:0] current_segment_c,
     input wire [15:0] current_segment_bs,
 
-    input wire [3:0] current_w_prime[9],
-    input wire [3:0] current_w_main [9],
+    input wire [3:0] current_w_prime[16],
+    input wire [3:0] current_w_main [16],
 
     input wire [1:0] output_lcd_h_index,
 
@@ -30,12 +30,22 @@ module normalize #(
     end
   end
 
-  always @(posedge clk) begin
-    int x, y, z;
+	  always @(posedge clk) begin
+	    int x, y, z;
 
-    case (cpu_id)
-      4: begin
-        // SM5a
+	    case (cpu_id)
+	      3: begin
+	        // SM530 uses SM500-style LCD outputs: x is the O group, y is one
+	        // of four segment bits, and z selects H1/H2.
+	        for (x = 0; x < MAX_X_SEGMENT; x += 1) begin
+	          for (y = 0; y < 4; y += 1) begin
+	            segments[x][y][0] <= current_w_prime[x][y];
+	            segments[x][y][1] <= current_w_main[x][y];
+	          end
+	        end
+	      end
+	      4: begin
+	        // SM5a
         for (x = 0; x < MAX_X_SEGMENT; x += 1) begin
           // Only 4 Y segments
           for (y = 0; y < 4; y += 1) begin
