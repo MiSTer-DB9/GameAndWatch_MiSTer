@@ -8,13 +8,18 @@ import {
 
 const PORT_START_REGEX = /^\s*PORT_START\("(.*)"\)/;
 
-/**
- * Captures bit, high/low active status, input, and optional name
- */
+/** Captures bit, high/low active status, and input. */
 const PORT_BIT_REGEX =
-  /PORT_BIT\(\s*([0-9A-Fx]+)\s*,\s*(.*?)\s*,\s*(.*?)\s*\).*(?:PORT_NAME\("(.*)"\))?/;
+  /PORT_BIT\(\s*([0-9A-Fa-fxX]+)\s*,\s*(.*?)\s*,\s*(.*?)\s*\)/;
 
-const PORT_CONFSETTING_REGEX = /PORT_CONFSETTING\(\s*([0-9A-Fx]+)\s*,/;
+// Parse PORT_NAME separately. Making this an optional suffix of PORT_BIT lets
+// the preceding wildcard consume it while the overall expression still
+// succeeds, silently dropping every human-readable input name.
+const PORT_NAME_REGEX = /PORT_NAME\(\s*(?:u8|u|U|L)?"([^"]*)"\s*\)/;
+
+const PORT_PLAYER_REGEX = /PORT_PLAYER\(\s*([0-9]+)\s*\)/;
+
+const PORT_CONFSETTING_REGEX = /PORT_CONFSETTING\(\s*([0-9A-Fa-fxX]+)\s*,/;
 
 const PORT_INCLUDE_REGEX = /PORT_INCLUDE\(\s*(.*)\s*\)/;
 
@@ -36,6 +41,7 @@ export const parseInputs = (
   const lines = inputBody.trim().split("\n");
 
   let currentPort: Port | undefined = undefined;
+  let ignoredPortBody = false;
   const ports: Port[] = [];
 
   // If set, this port includes port mapping from another console
@@ -57,7 +63,13 @@ export const parseInputs = (
         ports.push(currentPort);
       }
 
+      // A new MAME port always ends the preceding physical port. Unsupported
+      // pseudo-ports such as "FAKE" must not leave currentPort pointing at it,
+      // or their following bits will overwrite and duplicate the prior port.
+      currentPort = undefined;
+
       const portType = parsePortName(name, deviceName);
+      ignoredPortBody = !portType;
 
       if (portType) {
         switch (portType.type) {
@@ -81,14 +93,19 @@ export const parseInputs = (
 
     match = line.match(PORT_BIT_REGEX);
     if (match) {
-      const [_, unparsedBit, unparsedActive, unparsedButton, portName] = match;
+      const [_, unparsedBit, unparsedActive, unparsedButton] = match;
+      const portName = line.match(PORT_NAME_REGEX)?.[1];
+      const playerMatch = line.match(PORT_PLAYER_REGEX);
+      const player = playerMatch
+        ? Number.parseInt(playerMatch[1], 10)
+        : undefined;
 
       const bit = parseInt(
         unparsedBit.startsWith("0x") ? unparsedBit.slice(2) : unparsedBit,
         16
       );
 
-      const index = indexFromBit(bit);
+      const bitIndex = indexFromBit(bit);
       const button = parseButton(unparsedButton, line);
 
       if (!button) {
@@ -99,9 +116,14 @@ export const parseInputs = (
       }
 
       const activeHigh =
-        unparsedActive === "IP_ACTIVE_HIGH" || button.startsWith("custom");
+        unparsedActive === "IP_ACTIVE_HIGH" ||
+        button.startsWith("custom") ||
+        button === "dial";
 
       if (!currentPort) {
+        if (ignoredPortBody) {
+          continue;
+        }
         console.log(
           `Attempted to add button ${line} without port to device ${deviceName}`
         );
@@ -112,10 +134,12 @@ export const parseInputs = (
         action: button,
         activeLow: !activeHigh,
         name: portName,
+        player,
       };
 
       if (currentPort.type === "s") {
-        currentPort.bitmap[index] = namedAction;
+        const targetPort = sPortForBit(currentPort, ports, bitIndex);
+        targetPort.bitmap[bitIndex % 4] = namedAction;
       } else {
         // All other ports
         currentPort.bit = namedAction;
@@ -132,18 +156,20 @@ export const parseInputs = (
         16
       );
 
-      const index = indexFromBit(bit);
+      const bitIndex = indexFromBit(bit);
 
       if (currentPort) {
         if (currentPort.type === "s") {
-          if (!currentPort.bitmap[index]) {
+          const targetPort = sPortForBit(currentPort, ports, bitIndex);
+
+          if (!targetPort.bitmap[bitIndex % 4]) {
             // No configured value for that port index. This is probably the first (default)
             const namedAction: NamedAction = {
               action: "unused",
               activeLow: false,
             };
 
-            currentPort.bitmap[index] = namedAction;
+            targetPort.bitmap[bitIndex % 4] = namedAction;
           }
         } else {
           // Single bit port
@@ -249,7 +275,7 @@ export const collapseInputs = (ports: {
           // Both definitions have this port. We need to merge
           if (innerPort.type === "s" && existingPort.type === "s") {
             // Second check to satisfy TS
-            for (let i = 0; i < 3; i++) {
+            for (let i = 0; i < 4; i++) {
               const newBit = innerPort.bitmap[i];
               const existingBit = existingPort.bitmap[i];
 
@@ -314,6 +340,37 @@ const nameInnerPort = (port: Port): string => {
   return port.type;
 };
 
+const sPortForBit = (
+  currentPort: Extract<Port, { type: "s" }>,
+  ports: Port[],
+  bitIndex: number
+): Extract<Port, { type: "s" }> => {
+  const index = currentPort.index + Math.floor(bitIndex / 4);
+
+  if (index === currentPort.index) {
+    return currentPort;
+  }
+
+  const existing = ports.find(
+    (port): port is Extract<Port, { type: "s" }> =>
+      port.type === "s" && port.index === index
+  );
+
+  if (existing) {
+    return existing;
+  }
+
+  const port: Extract<Port, { type: "s" }> = {
+    type: "s",
+    index,
+    bitmap: [undefined, undefined, undefined, undefined],
+  };
+
+  ports.push(port);
+
+  return port;
+};
+
 const parseButton = (button: string, line = ""): Action | undefined => {
   switch (button) {
     case "IPT_JOYSTICK_UP":
@@ -373,6 +430,10 @@ const parseButton = (button: string, line = ""): Action | undefined => {
       return "service1";
     case "IPT_SERVICE2":
       return "service2";
+    case "IPT_SERVICE3":
+      return "service3";
+    case "IPT_SERVICE4":
+      return "service4";
 
     case "IPT_VOLUME_DOWN":
       return "volumeDown";
@@ -380,6 +441,9 @@ const parseButton = (button: string, line = ""): Action | undefined => {
       return "powerOn";
     case "IPT_POWER_OFF":
       return "powerOff";
+
+    case "IPT_DIAL":
+      return "dial";
 
     // Keypad is not supported
     case "IPT_KEYPAD":
@@ -443,7 +507,7 @@ const parsePortName = (
 const indexFromBit = (bit: number): number => {
   let value = bit;
 
-  for (let count = 0; count < 4; count++) {
+  for (let count = 0; count < 8; count++) {
     if (value & 0x1) {
       return count;
     }

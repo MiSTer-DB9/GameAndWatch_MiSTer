@@ -9,13 +9,15 @@ interface instructions (
 
     // Internal
     input wire gamma,
+    input wire [3:0] gamma_flags,
     input wire [14:0] divider,
     input wire divider_4hz,
     input wire divider_32hz,
+    input wire [3:0] divider_count_10ms,
     input wire [5:0] last_Pl,
 
     // IO
-    input wire [3:0] input_k,
+    input wire [7:0] input_k,
     input wire input_beta,
     input wire input_ba
 );
@@ -59,6 +61,7 @@ interface instructions (
   reg skip_next_if_lax = 0;
 
   reg temp_sbm = 0;
+  reg temp_sabl = 0;
 
   reg [5:0] next_ram_addr = 0;
   reg wr_next_ram_addr = 0;
@@ -66,11 +69,14 @@ interface instructions (
   reg reset_divider = 0;
   reg reset_divider_keep_6 = 0;
   reg reset_gamma = 0;
+  reg [3:0] reset_gamma_mask = 0;
+  reg reset_10ms_counter = 0;
 
   reg halt = 0;
 
   reg [3:0] stored_output_r = 0;
   reg [3:0] output_r = 0;
+  reg [3:0] output_f = 0;
 
   // SM511/SM512 melody controller and clock selection
   reg sm511_slow_clock = 1;
@@ -107,13 +113,15 @@ interface instructions (
   // MAME calls this `m_rsub`
   reg within_subroutine = 0;
 
-  reg [3:0] w_prime[9];
-  reg [3:0] w_main[9];
+  reg [3:0] w_prime[16];
+  reg [3:0] w_main[16];
 
   // LCD CN flag. MAME uses bit 3 of `m_bp` for this
   reg lcd_cn = 0;
 
   reg m_prime = 0;
+
+  reg sm530_display_enabled = 1;
 
   ////////////////////////////////////////////////////////////////////////////////////////
   // Instruction shortcuts
@@ -147,6 +155,16 @@ interface instructions (
     wr_next_ram_addr <= 1;
 
     skip_next_instr <= Bl == 4'h7;
+  endtask
+
+  task incb_sm530();
+    reg [3:0] next_bl;
+    next_bl = Bl + 4'h1;
+
+    next_ram_addr[3:0] <= next_bl;
+    wr_next_ram_addr <= 1;
+
+    skip_next_instr <= next_bl[2:0] == 3'h0;
   endtask
 
   task decb();
@@ -240,9 +258,9 @@ interface instructions (
 
   task automatic clock_melody();
     case (cpu_id)
-      1, 2, 6, 7: begin
-        // SM511/SM512 dedicated melody generator. The melody ROM stores 6-bit commands in
-        // 8-bit bytes; bit 5 selects duration and bit 4 selects octave.
+	      1, 2, 3, 6, 7: begin
+	        // SM511/SM512/SM530 dedicated melody generator. The melody ROM stores 6-bit
+	        // commands in 8-bit bytes; bit 5 selects duration and bit 4 selects octave.
         reg [5:0] cmd;
         reg [3:0] tone;
         reg [4:0] target_cycles;
@@ -277,7 +295,7 @@ interface instructions (
           end
         end
 
-        if ((divider & 15'h007F) == 15'h0000) begin
+	        if ((divider & (cpu_id == 4'd3 ? 15'h00FF : 15'h007F)) == 15'h0000) begin
           step_mask = cmd[5] ? 5'h1F : 5'h0F;
           next_step_count = (melody_step_count + 5'd1) & step_mask;
           melody_step_count <= next_step_count;
@@ -427,6 +445,14 @@ interface instructions (
     skip_next_instr <= result[4] && opcode[3:0] != 4'hA;
   endtask
 
+  task adx_sm530();
+    reg [4:0] result;
+
+    result = Acc + opcode[3:0];
+    Acc <= result[3:0];
+    skip_next_instr <= result[4];
+  endtask
+
   task lb();
     // LB x. Set lower Bm to immed. Set lower Bl to immed. Set upper Bl to ORed immed
     // OR is questionable here according to docs, but other implementations (MAME) use OR
@@ -441,6 +467,11 @@ interface instructions (
     // LB x. Set Bm to lower 2 bits immed. Set lower Bl to upper 2 bits immed. Set upper Bl to 2 if immed had data
     Bl <= {opcode[3:2] != 0 ? 2'b10 : 2'b0, opcode[3:2]};
     Bm <= {1'b0, opcode[1:0]};
+  endtask
+
+  task lb_sm530();
+    Bl <= {opcode[1], 2'b11, opcode[0]};
+    Bm <= {1'b0, opcode[3:2]};
   endtask
 
   task tb();
@@ -586,7 +617,12 @@ interface instructions (
 
   task kta();
     // KTA. Read K input bits into Acc
-    Acc <= input_k;
+    Acc <= input_k[3:0];
+  endtask
+
+  task keta();
+    // KETA. Read SM530 KE input bits into Acc
+    Acc <= input_k[7:4];
   endtask
 
   task rot();
@@ -694,7 +730,7 @@ interface instructions (
 
   task shift_w_prime(reg [3:0] w_length, reg [3:0] new_value);
     int i;
-    for (i = 0; i < 8; i += 1) begin
+    for (i = 0; i < w_length - 1; i += 1) begin
       w_prime[i] <= w_prime[i+1];
     end
     // Put new value in correct position
@@ -716,7 +752,7 @@ interface instructions (
 
   // task pdtw(reg [3:0] w_length);
   //   // PDTW. Shift last two nibbles of W', moving one PLA value in
-  //   reg [3:0] w_prime_temp[9];
+  //   reg [3:0] w_prime_temp[16];
   //   reg [3:0] digit;
 
   //   digit = pla_digit();
@@ -793,6 +829,11 @@ interface instructions (
     Acc <= divider[14:11];
   endtask
 
+  task dta_sm530();
+    // SM530 DTA copies the 1/100s counter.
+    Acc <= divider_count_10ms;
+  endtask
+
   task pre();
     // PRE. Preset the SM511/SM512 melody ROM pointer.
     melody_address <= opcode;
@@ -813,6 +854,36 @@ interface instructions (
     // TMEL. Skip if the melody stop flag is set, then clear it.
     skip_next_instr <= melody_rd[1];
     melody_rd[1] <= 0;
+  endtask
+
+  task ats();
+    // SM530 ATS transfers Acc to the 4-bit S output port.
+    shifter_s <= {4'h0, Acc};
+  endtask
+
+  task atf();
+    output_f <= Acc;
+  endtask
+
+  task rds();
+    sm530_display_enabled <= 0;
+  endtask
+
+  task sds();
+    sm530_display_enabled <= 1;
+  endtask
+
+  task tg();
+    skip_next_instr <= gamma_flags[opcode[1:0]];
+    reset_gamma_mask <= 4'h1 << opcode[1:0];
+  endtask
+
+  task sabl();
+    temp_sabl <= 1;
+  endtask
+
+  task inis();
+    reset_10ms_counter <= 1;
   endtask
 
   task clklo();
