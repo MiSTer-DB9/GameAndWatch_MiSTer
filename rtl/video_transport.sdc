@@ -54,6 +54,31 @@ proc gw_mstable_delay {source destination} {
       -value_multiplier 0.8
 }
 
+# [MiSTer-DB9 BEGIN] - the hardcoded dffe*2a/dffe*3a stage names below never
+# match: every Quartus able to build this core (17.0.2 Standard, 17.1 Standard,
+# 17.1 Lite) names the two dcfifo synchronizer stages dffpipe_se9:dffpipe4|
+# dffe5a / dffe6a, so read_sdc failed and the fitter aborted with Error 11802.
+# Derive the two stage register names from the netlist instead, keeping the same
+# fail-closed checks. Numeric order is stage order: rdptr_g reaches dffe5a in one
+# hop, dffe6a in two. Remove once upstream fixes the patterns.
+proc gw_sync_stage_names {pattern} {
+  set names {}
+  foreach_in_collection node [get_keepers -nowarn $pattern] {
+    set leaf [lindex [split [get_node_info -name $node] "|"] end]
+    if {[regexp {^(dffe\d+a)\[} $leaf -> reg] && [lsearch -exact $names $reg] < 0} {
+      lappend names $reg
+    }
+  }
+  set names [lsort -dictionary $names]
+  if {[llength $names] != 2} {
+    error "GameAndWatch: expected 2 synchronizer stages matching $pattern, matched [llength $names]"
+  }
+  post_message -type info \
+      "GameAndWatch: synchronizer stages for $pattern are [join $names {, }]"
+  return $names
+}
+# [MiSTer-DB9 END]
+
 # Fitter routing optimization may legally add `~DUPLICATE` keepers to a FIFO
 # pointer or synchronizer stage. Validate the canonical bus width exactly, but
 # return the complete collection so constraints also cover any such replicas.
@@ -126,21 +151,31 @@ foreach GW_FIFO_PATH $GW_FIFO_INSTANCES {
   set GW_READ_GRAY [gw_keeper_set fifo_read_gray_launch \
       [format {%s|dcfifo_component|auto_generated|rdptr_g[*]} \
           $GW_FIFO_PATH] 11]
+  # [MiSTer-DB9 BEGIN] - stage names derived from the netlist, see gw_sync_stage_names
+  set GW_READ_STAGES [gw_sync_stage_names \
+      [format {%s|dcfifo_component|auto_generated|*ws_dgrp|dffpipe*|dffe*a[*]} \
+          $GW_FIFO_PATH]]
   set GW_READ_SYNC_FIRST [gw_keeper_set fifo_read_gray_sync_first \
-      [format {%s|dcfifo_component|auto_generated|*ws_dgrp|dffpipe*|dffe*2a[*]} \
-          $GW_FIFO_PATH] 11]
+      [format {%s|dcfifo_component|auto_generated|*ws_dgrp|dffpipe*|%s[*]} \
+          $GW_FIFO_PATH [lindex $GW_READ_STAGES 0]] 11]
   set GW_READ_SYNC_SECOND [gw_keeper_set fifo_read_gray_sync_second \
-      [format {%s|dcfifo_component|auto_generated|*ws_dgrp|dffpipe*|dffe*3a[*]} \
-          $GW_FIFO_PATH] 11]
+      [format {%s|dcfifo_component|auto_generated|*ws_dgrp|dffpipe*|%s[*]} \
+          $GW_FIFO_PATH [lindex $GW_READ_STAGES 1]] 11]
+  # [MiSTer-DB9 END]
   set GW_WRITE_GRAY [gw_keeper_set fifo_write_gray_launch \
       [format {%s|dcfifo_component|auto_generated|delayed_wrptr_g[*]} \
           $GW_FIFO_PATH] 11]
+  # [MiSTer-DB9 BEGIN] - stage names derived from the netlist, see gw_sync_stage_names
+  set GW_WRITE_STAGES [gw_sync_stage_names \
+      [format {%s|dcfifo_component|auto_generated|*rs_dgwp|dffpipe*|dffe*a[*]} \
+          $GW_FIFO_PATH]]
   set GW_WRITE_SYNC_FIRST [gw_keeper_set fifo_write_gray_sync_first \
-      [format {%s|dcfifo_component|auto_generated|*rs_dgwp|dffpipe*|dffe*2a[*]} \
-          $GW_FIFO_PATH] 11]
+      [format {%s|dcfifo_component|auto_generated|*rs_dgwp|dffpipe*|%s[*]} \
+          $GW_FIFO_PATH [lindex $GW_WRITE_STAGES 0]] 11]
   set GW_WRITE_SYNC_SECOND [gw_keeper_set fifo_write_gray_sync_second \
-      [format {%s|dcfifo_component|auto_generated|*rs_dgwp|dffpipe*|dffe*3a[*]} \
-          $GW_FIFO_PATH] 11]
+      [format {%s|dcfifo_component|auto_generated|*rs_dgwp|dffpipe*|%s[*]} \
+          $GW_FIFO_PATH [lindex $GW_WRITE_STAGES 1]] 11]
+  # [MiSTer-DB9 END]
 
   # Bound the asynchronous Gray bus through the first destination stage, then
   # bound routing to the second destination stage so it retains almost a full
