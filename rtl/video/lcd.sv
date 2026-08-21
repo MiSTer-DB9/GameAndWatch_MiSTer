@@ -1,6 +1,4 @@
-module lcd #(
-    parameter CLOCK_RATIO = 3
-) (
+module lcd (
     input wire clk,
 
     input wire reset,
@@ -8,6 +6,8 @@ module lcd #(
     input wire [3:0] cpu_id,
 
     input wire mask_data_wr,
+    input wire crt_mask_data_wr,
+    input wire crt_mask_data_start,
     input wire [15:0] mask_data,
 
     // Segments
@@ -16,17 +16,20 @@ module lcd #(
     input wire [15:0] current_segment_c,
     input wire [15:0] current_segment_bs,
 
-    input wire [3:0] current_w_prime[9],
-    input wire [3:0] current_w_main [9],
+    input wire [3:0] current_w_prime[16],
+    input wire [3:0] current_w_main [16],
 
     input wire [1:0] output_lcd_h_index,
 
     input wire divider_1khz,
 
     // Video counters
+    input wire use_crt_assets,
+    input wire pixel_tick,
+    input wire [1:0] source_x_step,
     input wire vblank_int,
     input wire hblank_int,
-    input wire [9:0] video_x,
+    input wire [10:0] video_x,
     input wire [9:0] video_y,
 
     output wire segment_en
@@ -34,7 +37,7 @@ module lcd #(
   localparam DECAY_MAX = 5'h1F;
   localparam DECAY_MIN_DISPLAY = 5'h10;
 
-  localparam MAX_X_SEGMENT = 9;
+  localparam MAX_X_SEGMENT = 16;
   localparam MAX_Y_SEGMENT = 16;
   localparam MAX_Z_SEGMENT = 4;
 
@@ -70,7 +73,6 @@ module lcd #(
   );
 
   segments #(
-      .CLOCK_RATIO  (CLOCK_RATIO),
       .MAX_X_SEGMENT(MAX_X_SEGMENT),
       .MAX_Y_SEGMENT(MAX_Y_SEGMENT),
       .MAX_Z_SEGMENT(MAX_Z_SEGMENT)
@@ -82,10 +84,15 @@ module lcd #(
       .cpu_id(cpu_id),
 
       .mask_data_wr(mask_data_wr),
+      .crt_mask_data_wr(crt_mask_data_wr),
+      .crt_mask_data_start(crt_mask_data_start),
       .mask_data(mask_data),
 
       .segments(vsync_segments),
 
+      .use_crt_assets(use_crt_assets),
+      .pixel_tick(pixel_tick),
+      .source_x_step(source_x_step),
       .vblank_int(vblank_int),
       .hblank_int(hblank_int),
       .video_x(video_x),
