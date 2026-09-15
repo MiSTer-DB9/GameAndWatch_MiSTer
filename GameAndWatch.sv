@@ -224,6 +224,13 @@ module emu (
   wire   [5:0] db9_remap_byte_cnt;
   wire  [15:0] db9_remap_din;
   // [MiSTer-DB9 END]
+  // [MiSTer-DB9 BEGIN] - DB9 remap factory default (used until Main_MiSTer streams UIO 0xFD)
+  // Derived from CONF_STR J1, same rule as db9_map.cpp; lets the core work on a stock MiSTer binary.
+  // DB15:  Btn 1/R Joy Down=A, Btn 2/R Joy Right=B, Btn 3/R Joy Left=C, Btn 4/R Joy Up=D, Time/Pause/Status=E, Alarm=F, Game A/Power On=-, Game B/Power Off=-, Sound/Minute=-
+  // DB9MD: Btn 1/R Joy Down=A, Btn 2/R Joy Right=B, Btn 3/R Joy Left=C, Btn 4/R Joy Up=X, Time/Pause/Status=Y, Alarm=Z, Game A/Power On=-, Game B/Power Off=-, Sound/Minute=-
+  wire  [35:0] db9_remap_default_db15  = 36'hFFF987654;
+  wire  [35:0] db9_remap_default_db9md = 36'hFFF987654;
+  // [MiSTer-DB9 END]
   joydb joydb (
     .clk             ( CLK_JOY         ),
     .clk_sys         ( clk_sys_99_287            ),
@@ -244,6 +251,8 @@ module emu (
     .remap_cmd       ( db9_remap_cmd      ),
     .remap_byte_cnt  ( db9_remap_byte_cnt ),
     .remap_din       ( db9_remap_din      ),
+    .remap_default_db15  ( db9_remap_default_db15  ),
+    .remap_default_db9md ( db9_remap_default_db9md ),
     .joydb_1_mapped  ( joydb_1_mapped     ),
     .joydb_2_mapped  ( joydb_2_mapped     ),
     .pad_1_6btn      ( pad_1_6btn      ),
